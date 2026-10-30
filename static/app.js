@@ -100,15 +100,24 @@ startBtn.addEventListener('click', async () => {
         await new Promise(resolve => {
             if (peerConnection.iceGatheringState === 'complete') {
                 resolve();
-            } else {
-                const checkIce = () => {
-                    if (peerConnection.iceGatheringState === 'complete') {
-                        peerConnection.removeEventListener('icegatheringstatechange', checkIce);
-                        resolve();
-                    }
-                };
-                peerConnection.addEventListener('icegatheringstatechange', checkIce);
+                return;
             }
+
+            let timeoutId = null;
+            const checkIce = () => {
+                if (peerConnection.iceGatheringState === 'complete') {
+                    peerConnection.removeEventListener('icegatheringstatechange', checkIce);
+                    if (timeoutId) clearTimeout(timeoutId);
+                    resolve();
+                }
+            };
+
+            peerConnection.addEventListener('icegatheringstatechange', checkIce);
+
+            timeoutId = setTimeout(() => {
+                peerConnection.removeEventListener('icegatheringstatechange', checkIce);
+                resolve();
+            }, 3000);
         });
 
         const res = await fetch('/api/offer', {
@@ -129,11 +138,11 @@ startBtn.addEventListener('click', async () => {
 
     } catch (err) {
         showMessage(err.message, true);
-        stopRecording();
+        stopRecording(null);
     }
 });
 
-function stopRecording() {
+function stopRecording(statusMessage = 'Recording stopped and saved on server.') {
     stopTimer();
     stopMeter();
     if (localStream) {
@@ -147,7 +156,10 @@ function stopRecording() {
     startBtn.disabled = false;
     stopBtn.disabled = true;
     setStatus('Ready', false);
-    showMessage('Recording stopped and saved on server.');
+    if (statusMessage instanceof Event || (typeof statusMessage === 'string' && statusMessage.trim().length > 0)) {
+        const text = typeof statusMessage === 'string' ? statusMessage : 'Recording stopped and saved on server.';
+        showMessage(text);
+    }
 }
 
-stopBtn.addEventListener('click', stopRecording);
+stopBtn.addEventListener('click', () => stopRecording());
