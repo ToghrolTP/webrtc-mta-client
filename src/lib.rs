@@ -4,6 +4,7 @@ use axum::{
 };
 use serde_json::{Value, json};
 
+pub mod recorder;
 pub mod signaling;
 
 pub async fn health_handler() -> Json<Value> {

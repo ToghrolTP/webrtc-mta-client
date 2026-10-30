@@ -2,6 +2,8 @@ use axum::{Json, http::StatusCode};
 use rtc::peer_connection::sdp::RTCSessionDescription;
 use serde::{Deserialize, Serialize};
 
+use crate::recorder::handle_webrtc_offer;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionDescription {
     pub sdp: String,
@@ -15,9 +17,17 @@ pub async fn offer_handler(
         return Err(StatusCode::BAD_REQUEST);
     }
 
-    // Verify SDP parses as a valid session description
-    RTCSessionDescription::offer(payload.sdp.clone()).map_err(|_| StatusCode::BAD_REQUEST)?;
+    // Validate offer SDP without unnecessary cloning
+    let offer = RTCSessionDescription::offer(payload.sdp).map_err(|_| StatusCode::BAD_REQUEST)?;
 
-    // Placeholder until WebRTC pipeline is wired in Task 3
-    Err(StatusCode::NOT_IMPLEMENTED)
+    match handle_webrtc_offer(offer.sdp).await {
+        Ok(answer_sdp) => Ok(Json(SessionDescription {
+            sdp: answer_sdp,
+            r#type: "answer".to_string(),
+        })),
+        Err(e) => {
+            tracing::error!("Failed to process WebRTC offer: {:?}", e);
+            Err(StatusCode::INTERNAL_SERVER_ERROR)
+        }
+    }
 }
