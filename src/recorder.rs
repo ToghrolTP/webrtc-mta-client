@@ -10,6 +10,8 @@ use rtc::rtp_transceiver::{RTCRtpTransceiverDirection, RTCRtpTransceiverInit};
 use std::fs::{self, File};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::Duration;
+use tokio::time::timeout;
 use webrtc::media_stream::track_remote::{TrackRemote, TrackRemoteEvent};
 use webrtc::peer_connection::{
     PeerConnection, PeerConnectionBuilder, PeerConnectionEventHandler, RTCIceGatheringState,
@@ -24,7 +26,7 @@ pub struct AudioRecorder {
 
 impl AudioRecorder {
     pub fn new(path: &Path) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
-        if let Some(parent) = path.parent() {
+        if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
             fs::create_dir_all(parent)?;
         }
         let file = File::create(path)?;
@@ -133,7 +135,7 @@ pub async fn handle_webrtc_offer(
     let config = RTCConfigurationBuilder::new().build();
     let (gather_tx, mut gather_rx) = channel::<()>(1);
 
-    let ts = Local::now().format("%Y%m%d_%H%M%S").to_string();
+    let ts = Local::now().format("%Y%m%d_%H%M%S_%3f").to_string();
     let out_path = PathBuf::from(format!("recordings/recording_{}.ogg", ts));
     let recorder = Arc::new(tokio::sync::Mutex::new(Some(AudioRecorder::new(
         &out_path,
@@ -172,7 +174,7 @@ pub async fn handle_webrtc_offer(
     let answer = peer_connection.create_answer(None).await?;
     peer_connection.set_local_description(answer).await?;
 
-    let _ = gather_rx.recv().await;
+    let _ = timeout(Duration::from_secs(5), gather_rx.recv()).await;
 
     let local_desc = peer_connection
         .local_description()
