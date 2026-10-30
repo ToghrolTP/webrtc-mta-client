@@ -63,6 +63,7 @@ pub struct PeerHandler {
     pub runtime: Arc<dyn Runtime>,
     pub gather_complete_tx: Sender<()>,
     pub recorder: Arc<tokio::sync::Mutex<Option<AudioRecorder>>>,
+    pub recordings_dir: PathBuf,
 }
 
 #[async_trait::async_trait]
@@ -75,7 +76,10 @@ impl PeerConnectionEventHandler for PeerHandler {
 
     async fn on_connection_state_change(&self, state: RTCPeerConnectionState) {
         tracing::info!("Peer connection state: {:?}", state);
-        if state == RTCPeerConnectionState::Failed || state == RTCPeerConnectionState::Closed {
+        if state == RTCPeerConnectionState::Disconnected
+            || state == RTCPeerConnectionState::Failed
+            || state == RTCPeerConnectionState::Closed
+        {
             let mut guard = self.recorder.lock().await;
             if let Some(ref mut r) = *guard {
                 let _ = r.close();
@@ -93,6 +97,23 @@ impl PeerConnectionEventHandler for PeerHandler {
 
         if mime_type == MIME_TYPE_OPUS.to_lowercase() {
             tracing::info!("Receiving Opus audio track, writing to Ogg...");
+            let ts = Local::now().format("%Y%m%d_%H%M%S_%3f").to_string();
+            let out_path = self.recordings_dir.join(format!("recording_{}.ogg", ts));
+
+            match AudioRecorder::new(&out_path) {
+                Ok(rec) => {
+                    let mut guard = self.recorder.lock().await;
+                    if let Some(ref mut old) = *guard {
+                        let _ = old.close();
+                    }
+                    *guard = Some(rec);
+                }
+                Err(e) => {
+                    tracing::error!("Failed to create audio recorder at {:?}: {:?}", out_path, e);
+                    return;
+                }
+            }
+
             let recorder = Arc::clone(&self.recorder);
             self.runtime.spawn(Box::pin(async move {
                 while let Some(evt) = track.poll().await {
@@ -135,17 +156,15 @@ pub async fn handle_webrtc_offer(
     let config = RTCConfigurationBuilder::new().build();
     let (gather_tx, mut gather_rx) = channel::<()>(1);
 
-    let ts = Local::now().format("%Y%m%d_%H%M%S_%3f").to_string();
-    let out_path = PathBuf::from(format!("recordings/recording_{}.ogg", ts));
-    let recorder = Arc::new(tokio::sync::Mutex::new(Some(AudioRecorder::new(
-        &out_path,
-    )?)));
+    let recorder = Arc::new(tokio::sync::Mutex::new(None));
+    let recordings_dir = PathBuf::from("recordings");
 
     let runtime = Arc::new(TokioRuntime);
     let handler = Arc::new(PeerHandler {
         runtime: runtime.clone(),
         gather_complete_tx: gather_tx,
         recorder,
+        recordings_dir,
     });
 
     let peer_connection = PeerConnectionBuilder::new()

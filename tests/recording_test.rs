@@ -18,4 +18,8 @@ fn test_audio_recorder_creates_valid_ogg_headers() {
     let content = fs::read(&test_file).unwrap();
     assert!(content.len() >= 4, "File too small");
     assert_eq!(&content[0..4], b"OggS", "File missing OggS magic bytes");
+    assert!(
+        content.windows(8).any(|w| w == b"OpusHead"),
+        "File missing OpusHead header"
+    );
 }

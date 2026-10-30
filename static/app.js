@@ -26,6 +26,7 @@ function showMessage(msg, isError = false) {
 }
 
 function startTimer() {
+    timerEl.textContent = '00:00';
     startTime = Date.now();
     timerInterval = setInterval(() => {
         const elapsed = Math.floor((Date.now() - startTime) / 1000);
@@ -89,6 +90,9 @@ startBtn.addEventListener('click', async () => {
                 setStatus('Recording...', true);
                 stopBtn.disabled = false;
                 startTimer();
+            } else if (peerConnection.connectionState === 'failed') {
+                showMessage('WebRTC connection failed (firewall or network error).', true);
+                stopRecording(null);
             } else if (peerConnection.connectionState === 'disconnected' || peerConnection.connectionState === 'closed') {
                 stopRecording();
             }
@@ -150,6 +154,7 @@ function stopRecording(statusMessage = 'Recording stopped and saved on server.')
         localStream = null;
     }
     if (peerConnection) {
+        peerConnection.onconnectionstatechange = null;
         peerConnection.close();
         peerConnection = null;
     }
