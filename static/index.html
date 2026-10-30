@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebRTC Audio Recorder</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="card">
+        <header>
+            <h1>WebRTC Audio Recorder</h1>
+            <p class="subtitle">Stream live microphone audio to Axum MTA ingest</p>
+        </header>
+
+        <main>
+            <div class="status-container">
+                <span class="status-dot" id="statusDot"></span>
+                <span id="statusText">Ready</span>
+            </div>
+
+            <div class="meter-wrapper">
+                <label>Audio Level</label>
+                <div class="meter-bar">
+                    <div class="meter-fill" id="meterFill"></div>
+                </div>
+            </div>
+
+            <div class="timer" id="timer">00:00</div>
+
+            <div class="controls">
+                <button id="startBtn" class="btn btn-primary">Start Recording</button>
+                <button id="stopBtn" class="btn btn-danger" disabled>Stop Recording</button>
+            </div>
+
+            <div id="message" class="message hidden"></div>
+        </main>
+    </div>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>
