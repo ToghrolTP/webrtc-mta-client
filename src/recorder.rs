@@ -5,6 +5,7 @@ use rtc::media::io::ogg_writer::OggWriter;
 use rtc::peer_connection::configuration::RTCConfigurationBuilder;
 use rtc::peer_connection::configuration::media_engine::{MIME_TYPE_OPUS, MediaEngine};
 use rtc::peer_connection::sdp::RTCSessionDescription;
+use rtc::peer_connection::transport::RTCIceServer;
 use rtc::rtp_transceiver::rtp_sender::{RTCRtpCodec, RTCRtpCodecParameters, RtpCodecKind};
 use rtc::rtp_transceiver::{RTCRtpTransceiverDirection, RTCRtpTransceiverInit};
 use std::fs::{self, File};
@@ -153,7 +154,15 @@ pub async fn handle_webrtc_offer(
     };
     media_engine.register_codec(audio_codec, RtpCodecKind::Audio)?;
 
-    let config = RTCConfigurationBuilder::new().build();
+    let config = RTCConfigurationBuilder::new()
+        .with_ice_servers(vec![RTCIceServer {
+            urls: vec![
+                "stun:stun.l.google.com:19302".to_string(),
+                "stun:stun1.l.google.com:19302".to_string(),
+            ],
+            ..Default::default()
+        }])
+        .build();
     let (gather_tx, mut gather_rx) = channel::<()>(1);
 
     let recorder = Arc::new(tokio::sync::Mutex::new(None));

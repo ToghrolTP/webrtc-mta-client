@@ -14,6 +14,7 @@ let analyser = null;
 let animFrameId = null;
 let timerInterval = null;
 let startTime = null;
+let connectionTimeout = null;
 
 function logDebug(msg) {
     const timestamp = new Date().toTimeString().split(' ')[0];
@@ -87,6 +88,7 @@ startBtn.addEventListener('click', async () => {
         messageEl.classList.add('hidden');
         setStatus('Requesting microphone...');
         startBtn.disabled = true;
+        stopBtn.disabled = false;
 
         localStream = await navigator.mediaDevices.getUserMedia({
             audio: { echoCancellation: true, noiseSuppression: true }
@@ -94,7 +96,12 @@ startBtn.addEventListener('click', async () => {
         logDebug('Microphone access granted');
 
         setStatus('Connecting WebRTC...');
-        peerConnection = new RTCPeerConnection();
+        peerConnection = new RTCPeerConnection({
+            iceServers: [
+                { urls: 'stun:stun.l.google.com:19302' },
+                { urls: 'stun:stun1.l.google.com:19302' }
+            ]
+        });
         localStream.getTracks().forEach(track => {
             logDebug(`Adding audio track: ${track.id || track.label}`);
             peerConnection.addTrack(track, localStream);
@@ -102,12 +109,24 @@ startBtn.addEventListener('click', async () => {
 
         startMeter(localStream);
 
+        connectionTimeout = setTimeout(() => {
+            if (peerConnection && peerConnection.connectionState !== 'connected') {
+                showMessage('WebRTC connection timed out (firewall or STUN error).', true);
+                stopRecording(null);
+            }
+        }, 10000);
+
         peerConnection.onconnectionstatechange = () => {
             const state = peerConnection.connectionState;
             logDebug(`WebRTC connection state -> ${state}`);
             if (state === 'connected') {
+                if (connectionTimeout) {
+                    clearTimeout(connectionTimeout);
+                    connectionTimeout = null;
+                }
                 setStatus('Recording...', true);
                 stopBtn.disabled = false;
+                startBtn.disabled = true;
                 startTimer();
             } else if (state === 'failed') {
                 showMessage('WebRTC connection failed (firewall or network error).', true);
@@ -175,6 +194,10 @@ startBtn.addEventListener('click', async () => {
 });
 
 function stopRecording(statusMessage = 'Recording stopped and saved on server.') {
+    if (connectionTimeout) {
+        clearTimeout(connectionTimeout);
+        connectionTimeout = null;
+    }
     stopTimer();
     stopMeter();
     if (localStream) {
