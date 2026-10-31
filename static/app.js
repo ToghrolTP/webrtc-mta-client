@@ -5,6 +5,7 @@ const statusText = document.getElementById('statusText');
 const meterFill = document.getElementById('meterFill');
 const timerEl = document.getElementById('timer');
 const messageEl = document.getElementById('message');
+const debugLog = document.getElementById('debugLog');
 
 let localStream = null;
 let peerConnection = null;
@@ -14,15 +15,27 @@ let animFrameId = null;
 let timerInterval = null;
 let startTime = null;
 
+function logDebug(msg) {
+    const timestamp = new Date().toTimeString().split(' ')[0];
+    const line = `[${timestamp}] ${msg}`;
+    if (debugLog) {
+        debugLog.textContent += line + '\n';
+        debugLog.scrollTop = debugLog.scrollHeight;
+    }
+    console.log(line);
+}
+
 function setStatus(text, isActive = false) {
     statusText.textContent = text;
     statusDot.classList.toggle('active', isActive);
+    logDebug(`Status: ${text}`);
 }
 
 function showMessage(msg, isError = false) {
     messageEl.textContent = msg;
     messageEl.classList.remove('hidden');
-    messageEl.style.color = isError ? '#ef4444' : '#10b981';
+    messageEl.style.color = isError ? '#cc0000' : '#008800';
+    logDebug(`${isError ? 'ERROR' : 'INFO'}: ${msg}`);
 }
 
 function startTimer() {
@@ -78,28 +91,39 @@ startBtn.addEventListener('click', async () => {
         localStream = await navigator.mediaDevices.getUserMedia({
             audio: { echoCancellation: true, noiseSuppression: true }
         });
+        logDebug('Microphone access granted');
 
         setStatus('Connecting WebRTC...');
         peerConnection = new RTCPeerConnection();
-        localStream.getTracks().forEach(track => peerConnection.addTrack(track, localStream));
+        localStream.getTracks().forEach(track => {
+            logDebug(`Adding audio track: ${track.id || track.label}`);
+            peerConnection.addTrack(track, localStream);
+        });
 
         startMeter(localStream);
 
         peerConnection.onconnectionstatechange = () => {
-            if (peerConnection.connectionState === 'connected') {
+            const state = peerConnection.connectionState;
+            logDebug(`WebRTC connection state -> ${state}`);
+            if (state === 'connected') {
                 setStatus('Recording...', true);
                 stopBtn.disabled = false;
                 startTimer();
-            } else if (peerConnection.connectionState === 'failed') {
+            } else if (state === 'failed') {
                 showMessage('WebRTC connection failed (firewall or network error).', true);
                 stopRecording(null);
-            } else if (peerConnection.connectionState === 'disconnected' || peerConnection.connectionState === 'closed') {
+            } else if (state === 'disconnected' || state === 'closed') {
                 stopRecording();
             }
         };
 
+        peerConnection.oniceconnectionstatechange = () => {
+            logDebug(`ICE connection state -> ${peerConnection.iceConnectionState}`);
+        };
+
         const offer = await peerConnection.createOffer();
         await peerConnection.setLocalDescription(offer);
+        logDebug('Created local SDP offer');
 
         await new Promise(resolve => {
             if (peerConnection.iceGatheringState === 'complete') {
@@ -109,6 +133,7 @@ startBtn.addEventListener('click', async () => {
 
             let timeoutId = null;
             const checkIce = () => {
+                logDebug(`ICE gathering state -> ${peerConnection.iceGatheringState}`);
                 if (peerConnection.iceGatheringState === 'complete') {
                     peerConnection.removeEventListener('icegatheringstatechange', checkIce);
                     if (timeoutId) clearTimeout(timeoutId);
@@ -120,10 +145,12 @@ startBtn.addEventListener('click', async () => {
 
             timeoutId = setTimeout(() => {
                 peerConnection.removeEventListener('icegatheringstatechange', checkIce);
+                logDebug('ICE gathering timeout reached (proceeding with gathered candidates)');
                 resolve();
             }, 3000);
         });
 
+        logDebug('Sending SDP offer to /api/offer');
         const res = await fetch('/api/offer', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -138,6 +165,7 @@ startBtn.addEventListener('click', async () => {
         }
 
         const answer = await res.json();
+        logDebug('Received SDP answer from server');
         await peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
 
     } catch (err) {
@@ -168,3 +196,5 @@ function stopRecording(statusMessage = 'Recording stopped and saved on server.')
 }
 
 stopBtn.addEventListener('click', () => stopRecording());
+
+logDebug('Debug UI initialized. Ready.');

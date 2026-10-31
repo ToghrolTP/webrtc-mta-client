@@ -7,35 +7,31 @@
     <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-    <div class="card">
-        <header>
-            <h1>WebRTC Audio Recorder</h1>
-            <p class="subtitle">Stream live microphone audio to Axum MTA ingest</p>
-        </header>
+    <h2>WebRTC Audio Recorder</h2>
 
-        <main>
-            <div class="status-container">
-                <span class="status-dot" id="statusDot"></span>
-                <span id="statusText">Ready</span>
-            </div>
+    <fieldset>
+        <legend>Controls</legend>
+        <button id="startBtn">Start Recording</button>
+        <button id="stopBtn" disabled>Stop Recording</button>
+    </fieldset>
 
-            <div class="meter-wrapper">
-                <label>Audio Level</label>
-                <div class="meter-bar">
-                    <div class="meter-fill" id="meterFill"></div>
-                </div>
-            </div>
+    <fieldset>
+        <legend>State</legend>
+        <div><strong>Status:</strong> <span id="statusDot">●</span> <span id="statusText">Ready</span></div>
+        <div><strong>Timer:</strong> <span id="timer">00:00</span></div>
+        <div>
+            <strong>Audio Level:</strong>
+            <span class="meter-bar">
+                <span class="meter-fill" id="meterFill"></span>
+            </span>
+        </div>
+        <div id="message" class="hidden"></div>
+    </fieldset>
 
-            <div class="timer" id="timer">00:00</div>
-
-            <div class="controls">
-                <button id="startBtn" class="btn btn-primary">Start Recording</button>
-                <button id="stopBtn" class="btn btn-danger" disabled>Stop Recording</button>
-            </div>
-
-            <div id="message" class="message hidden"></div>
-        </main>
-    </div>
+    <fieldset>
+        <legend>Debug Log</legend>
+        <pre id="debugLog"></pre>
+    </fieldset>
 
     <script src="/static/app.js"></script>
 </body>
