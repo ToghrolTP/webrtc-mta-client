@@ -11,6 +11,7 @@ use tower_http::services::{ServeDir, ServeFile};
 
 pub mod recorder;
 pub mod signaling;
+pub mod ws;
 
 #[derive(Serialize)]
 pub struct HealthResponse {
@@ -34,6 +35,7 @@ pub async fn app() -> Router {
     Router::new()
         .route("/api/health", get(health_handler))
         .route("/api/offer", post(signaling::offer_handler))
+        .route("/ws/audio", get(ws::ws_handler))
         .nest_service("/static", ServeDir::new("static"))
         .fallback_service(ServeFile::new("static/index.html"))
         .layer(middleware::from_fn(no_cache_middleware))

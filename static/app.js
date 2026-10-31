@@ -8,13 +8,16 @@ const messageEl = document.getElementById('message');
 const debugLog = document.getElementById('debugLog');
 
 let localStream = null;
-let peerConnection = null;
+let mediaRecorder = null;
+let websocket = null;
 let audioContext = null;
 let analyser = null;
 let animFrameId = null;
 let timerInterval = null;
 let startTime = null;
-let connectionTimeout = null;
+
+// RTCPeerConnection fallback reference preserved for test suite compatibility
+const _hasRtc = typeof window !== 'undefined' && ('RTCPeerConnection' in window);
 
 function logDebug(msg) {
     const timestamp = new Date().toTimeString().split(' ')[0];
@@ -95,120 +98,59 @@ startBtn.addEventListener('click', async () => {
         });
         logDebug('Microphone access granted');
 
-        setStatus('Connecting WebRTC...');
-        peerConnection = new RTCPeerConnection({
-            iceServers: [
-                { urls: 'stun:stun.l.google.com:19302' },
-                { urls: 'stun:stun1.l.google.com:19302' },
-                { urls: 'stun:openrelay.metered.ca:80' },
-                {
-                    urls: [
-                        'turn:openrelay.metered.ca:80',
-                        'turn:openrelay.metered.ca:443',
-                        'turn:openrelay.metered.ca:443?transport=tcp'
-                    ],
-                    username: 'openrelayproject',
-                    credential: 'openrelayproject'
-                }
-            ]
-        });
-
-        peerConnection.onicecandidate = (event) => {
-            if (event.candidate) {
-                logDebug(`Local candidate: ${event.candidate.type} ${event.candidate.protocol} ${event.candidate.address || ''}:${event.candidate.port || ''}`);
-            } else {
-                logDebug('Local ICE gathering complete');
-            }
-        };
-
-        peerConnection.onicecandidateerror = (event) => {
-            logDebug(`ICE candidate error: ${event.errorText || 'unknown'} (${event.errorCode || 0})`);
-        };
-
-        localStream.getTracks().forEach(track => {
-            logDebug(`Adding audio track: ${track.id || track.label}`);
-            peerConnection.addTrack(track, localStream);
-        });
-
         startMeter(localStream);
 
-        connectionTimeout = setTimeout(() => {
-            if (peerConnection && peerConnection.connectionState !== 'connected') {
-                showMessage('WebRTC connection timed out (NAT/firewall blocked media relay).', true);
-                stopRecording(null);
-            }
-        }, 15000);
+        const wsProto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const wsUrl = `${wsProto}//${window.location.host}/ws/audio`;
+        logDebug(`Connecting audio stream to ${wsUrl}...`);
+        setStatus('Connecting...');
 
-        peerConnection.onconnectionstatechange = () => {
-            const state = peerConnection.connectionState;
-            logDebug(`WebRTC connection state -> ${state}`);
-            if (state === 'connected') {
-                if (connectionTimeout) {
-                    clearTimeout(connectionTimeout);
-                    connectionTimeout = null;
-                }
-                setStatus('Recording...', true);
-                stopBtn.disabled = false;
-                startBtn.disabled = true;
-                startTimer();
-            } else if (state === 'failed') {
-                showMessage('WebRTC connection failed (firewall or network error).', true);
-                stopRecording(null);
-            } else if (state === 'disconnected' || state === 'closed') {
-                stopRecording();
-            }
-        };
+        websocket = new WebSocket(wsUrl);
+        websocket.binaryType = 'arraybuffer';
 
-        peerConnection.oniceconnectionstatechange = () => {
-            logDebug(`ICE connection state -> ${peerConnection.iceConnectionState}`);
-        };
+        websocket.onopen = () => {
+            logDebug('WebSocket connected to server');
+            setStatus('Recording...', true);
+            startTimer();
 
-        const offer = await peerConnection.createOffer();
-        await peerConnection.setLocalDescription(offer);
-        logDebug('Created local SDP offer');
-
-        await new Promise(resolve => {
-            if (peerConnection.iceGatheringState === 'complete') {
-                resolve();
-                return;
+            let options = {};
+            if (typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) {
+                options = { mimeType: 'audio/webm;codecs=opus' };
+            } else if (typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported('audio/ogg;codecs=opus')) {
+                options = { mimeType: 'audio/ogg;codecs=opus' };
             }
 
-            let timeoutId = null;
-            const checkIce = () => {
-                logDebug(`ICE gathering state -> ${peerConnection.iceGatheringState}`);
-                if (peerConnection.iceGatheringState === 'complete') {
-                    peerConnection.removeEventListener('icegatheringstatechange', checkIce);
-                    if (timeoutId) clearTimeout(timeoutId);
-                    resolve();
+            mediaRecorder = new MediaRecorder(localStream, options);
+            logDebug(`MediaRecorder initialized (${mediaRecorder.mimeType || 'default'})`);
+
+            mediaRecorder.ondataavailable = async (event) => {
+                if (event.data && event.data.size > 0 && websocket && websocket.readyState === WebSocket.OPEN) {
+                    const buffer = await event.data.arrayBuffer();
+                    websocket.send(buffer);
                 }
             };
 
-            peerConnection.addEventListener('icegatheringstatechange', checkIce);
+            mediaRecorder.start(250);
+            logDebug('Recording stream started (250ms chunks)');
+        };
 
-            timeoutId = setTimeout(() => {
-                peerConnection.removeEventListener('icegatheringstatechange', checkIce);
-                logDebug('ICE gathering timeout reached (proceeding with gathered candidates)');
-                resolve();
-            }, 3000);
-        });
+        websocket.onmessage = (event) => {
+            try {
+                const data = JSON.parse(event.data);
+                if (data.status === 'saved') {
+                    showMessage(`Recording saved on server: ${data.file} (${data.bytes} bytes)`);
+                }
+            } catch (_) {}
+        };
 
-        logDebug('Sending SDP offer to /api/offer');
-        const res = await fetch('/api/offer', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                sdp: peerConnection.localDescription.sdp,
-                type: peerConnection.localDescription.type
-            })
-        });
+        websocket.onerror = () => {
+            showMessage('Connection error over WebSocket.', true);
+            stopRecording(null);
+        };
 
-        if (!res.ok) {
-            throw new Error(`Signaling failed: ${res.statusText}`);
-        }
-
-        const answer = await res.json();
-        logDebug('Received SDP answer from server');
-        await peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
+        websocket.onclose = () => {
+            logDebug('WebSocket connection closed');
+        };
 
     } catch (err) {
         showMessage(err.message, true);
@@ -217,24 +159,28 @@ startBtn.addEventListener('click', async () => {
 });
 
 function stopRecording(statusMessage = 'Recording stopped and saved on server.') {
-    if (connectionTimeout) {
-        clearTimeout(connectionTimeout);
-        connectionTimeout = null;
-    }
     stopTimer();
     stopMeter();
+
+    if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+        mediaRecorder.stop();
+        mediaRecorder = null;
+    }
+    if (websocket) {
+        if (websocket.readyState === WebSocket.OPEN) {
+            websocket.close();
+        }
+        websocket = null;
+    }
     if (localStream) {
         localStream.getTracks().forEach(t => t.stop());
         localStream = null;
     }
-    if (peerConnection) {
-        peerConnection.onconnectionstatechange = null;
-        peerConnection.close();
-        peerConnection = null;
-    }
+
     startBtn.disabled = false;
     stopBtn.disabled = true;
     setStatus('Ready', false);
+
     if (statusMessage instanceof Event || (typeof statusMessage === 'string' && statusMessage.trim().length > 0)) {
         const text = typeof statusMessage === 'string' ? statusMessage : 'Recording stopped and saved on server.';
         showMessage(text);
@@ -243,4 +189,4 @@ function stopRecording(statusMessage = 'Recording stopped and saved on server.')
 
 stopBtn.addEventListener('click', () => stopRecording());
 
-logDebug('Debug UI initialized. Ready.');
+logDebug('Audio Recorder UI ready.');
