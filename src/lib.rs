@@ -1,5 +1,9 @@
 use axum::{
     Json, Router,
+    extract::Request,
+    http::{HeaderValue, header::CACHE_CONTROL},
+    middleware::{self, Next},
+    response::Response,
     routing::{get, post},
 };
 use serde::Serialize;
@@ -17,10 +21,20 @@ pub async fn health_handler() -> Json<HealthResponse> {
     Json(HealthResponse { status: "ok" })
 }
 
+async fn no_cache_middleware(req: Request, next: Next) -> Response {
+    let mut resp = next.run(req).await;
+    resp.headers_mut().insert(
+        CACHE_CONTROL,
+        HeaderValue::from_static("no-cache, no-store, must-revalidate"),
+    );
+    resp
+}
+
 pub async fn app() -> Router {
     Router::new()
         .route("/api/health", get(health_handler))
         .route("/api/offer", post(signaling::offer_handler))
         .nest_service("/static", ServeDir::new("static"))
         .fallback_service(ServeFile::new("static/index.html"))
+        .layer(middleware::from_fn(no_cache_middleware))
 }

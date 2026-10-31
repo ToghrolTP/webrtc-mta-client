@@ -10,8 +10,9 @@ use rtc::rtp_transceiver::rtp_sender::{RTCRtpCodec, RTCRtpCodecParameters, RtpCo
 use rtc::rtp_transceiver::{RTCRtpTransceiverDirection, RTCRtpTransceiverInit};
 use std::fs::{self, File};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 use std::time::Duration;
+use tokio::sync::Mutex;
 use tokio::time::timeout;
 use webrtc::media_stream::track_remote::{TrackRemote, TrackRemoteEvent};
 use webrtc::peer_connection::{
@@ -138,9 +139,20 @@ impl PeerConnectionEventHandler for PeerHandler {
     }
 }
 
+type ActivePeer = Arc<Mutex<Option<Arc<dyn PeerConnection>>>>;
+static ACTIVE_PEER_CONNECTION: LazyLock<ActivePeer> = LazyLock::new(|| Arc::new(Mutex::new(None)));
+
 pub async fn handle_webrtc_offer(
     offer_sdp: String,
 ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+    // Close previous active peer connection if any
+    {
+        let mut active = ACTIVE_PEER_CONNECTION.lock().await;
+        if let Some(prev) = active.take() {
+            let _ = prev.close().await;
+        }
+    }
+
     let mut media_engine = MediaEngine::default();
     let audio_codec = RTCRtpCodecParameters {
         rtp_codec: RTCRtpCodec {
@@ -155,13 +167,25 @@ pub async fn handle_webrtc_offer(
     media_engine.register_codec(audio_codec, RtpCodecKind::Audio)?;
 
     let config = RTCConfigurationBuilder::new()
-        .with_ice_servers(vec![RTCIceServer {
-            urls: vec![
-                "stun:stun.l.google.com:19302".to_string(),
-                "stun:stun1.l.google.com:19302".to_string(),
-            ],
-            ..Default::default()
-        }])
+        .with_ice_servers(vec![
+            RTCIceServer {
+                urls: vec![
+                    "stun:stun.l.google.com:19302".to_string(),
+                    "stun:stun1.l.google.com:19302".to_string(),
+                    "stun:openrelay.metered.ca:80".to_string(),
+                ],
+                ..Default::default()
+            },
+            RTCIceServer {
+                urls: vec![
+                    "turn:openrelay.metered.ca:80".to_string(),
+                    "turn:openrelay.metered.ca:443".to_string(),
+                    "turn:openrelay.metered.ca:443?transport=tcp".to_string(),
+                ],
+                username: "openrelayproject".to_string(),
+                credential: "openrelayproject".to_string(),
+            },
+        ])
         .build();
     let (gather_tx, mut gather_rx) = channel::<()>(1);
 
@@ -176,15 +200,17 @@ pub async fn handle_webrtc_offer(
         recordings_dir,
     });
 
-    let peer_connection = PeerConnectionBuilder::new()
-        .with_configuration(config)
-        .with_media_engine(media_engine)
-        .with_interceptor_registry(Registry::new())
-        .with_handler(handler as Arc<dyn PeerConnectionEventHandler>)
-        .with_runtime(runtime.clone())
-        .with_udp_addrs(vec!["0.0.0.0:0".to_string()])
-        .build()
-        .await?;
+    let peer_connection: Arc<dyn PeerConnection> = Arc::new(
+        PeerConnectionBuilder::new()
+            .with_configuration(config)
+            .with_media_engine(media_engine)
+            .with_interceptor_registry(Registry::new())
+            .with_handler(handler as Arc<dyn PeerConnectionEventHandler>)
+            .with_runtime(runtime.clone())
+            .with_udp_addrs(vec!["0.0.0.0:0".to_string()])
+            .build()
+            .await?,
+    );
 
     peer_connection
         .add_transceiver_from_kind(
@@ -208,6 +234,11 @@ pub async fn handle_webrtc_offer(
         .local_description()
         .await
         .ok_or("Failed to obtain local SDP description")?;
+
+    {
+        let mut active = ACTIVE_PEER_CONNECTION.lock().await;
+        *active = Some(peer_connection);
+    }
 
     Ok(local_desc.sdp)
 }

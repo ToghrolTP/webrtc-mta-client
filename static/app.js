@@ -99,9 +99,32 @@ startBtn.addEventListener('click', async () => {
         peerConnection = new RTCPeerConnection({
             iceServers: [
                 { urls: 'stun:stun.l.google.com:19302' },
-                { urls: 'stun:stun1.l.google.com:19302' }
+                { urls: 'stun:stun1.l.google.com:19302' },
+                { urls: 'stun:openrelay.metered.ca:80' },
+                {
+                    urls: [
+                        'turn:openrelay.metered.ca:80',
+                        'turn:openrelay.metered.ca:443',
+                        'turn:openrelay.metered.ca:443?transport=tcp'
+                    ],
+                    username: 'openrelayproject',
+                    credential: 'openrelayproject'
+                }
             ]
         });
+
+        peerConnection.onicecandidate = (event) => {
+            if (event.candidate) {
+                logDebug(`Local candidate: ${event.candidate.type} ${event.candidate.protocol} ${event.candidate.address || ''}:${event.candidate.port || ''}`);
+            } else {
+                logDebug('Local ICE gathering complete');
+            }
+        };
+
+        peerConnection.onicecandidateerror = (event) => {
+            logDebug(`ICE candidate error: ${event.errorText || 'unknown'} (${event.errorCode || 0})`);
+        };
+
         localStream.getTracks().forEach(track => {
             logDebug(`Adding audio track: ${track.id || track.label}`);
             peerConnection.addTrack(track, localStream);
@@ -111,10 +134,10 @@ startBtn.addEventListener('click', async () => {
 
         connectionTimeout = setTimeout(() => {
             if (peerConnection && peerConnection.connectionState !== 'connected') {
-                showMessage('WebRTC connection timed out (firewall or STUN error).', true);
+                showMessage('WebRTC connection timed out (NAT/firewall blocked media relay).', true);
                 stopRecording(null);
             }
-        }, 10000);
+        }, 15000);
 
         peerConnection.onconnectionstatechange = () => {
             const state = peerConnection.connectionState;
