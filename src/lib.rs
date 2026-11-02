@@ -37,6 +37,8 @@ pub async fn app() -> Router {
         .route("/api/offer", post(signaling::offer_handler))
         .route("/ws/audio", get(ws::ws_handler))
         .route("/ws/listen", get(ws::ws_listen_handler))
+        .route("/stream", get(ws::http_stream_handler))
+        .route("/stream.mp3", get(ws::http_stream_handler))
         .route_service("/listen", ServeFile::new("static/listen.html"))
         .route_service("/listen.html", ServeFile::new("static/listen.html"))
         .nest_service("/static", ServeDir::new("static"))

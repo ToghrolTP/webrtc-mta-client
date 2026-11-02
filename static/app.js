@@ -17,6 +17,7 @@ let analyser = null;
 let animFrameId = null;
 let timerInterval = null;
 let startTime = null;
+let mp3Encoder = null;
 
 // RTCPeerConnection fallback reference preserved for test suite compatibility
 const _hasRtc = typeof window !== 'undefined' && ('RTCPeerConnection' in window);
@@ -141,14 +142,22 @@ startBtn.addEventListener('click', async () => {
 
         websocket.onopen = () => {
             logDebug('WebSocket connected to server');
-            setStatus('Recording & Streaming...', true);
+            setStatus('Streaming live...', true);
             startTimer();
+
+            // Initialize MP3 Encoder: 1 channel (mono), 24000 Hz, 64 kbps
+            if (typeof lamejs !== 'undefined' && lamejs.Mp3Encoder) {
+                mp3Encoder = new lamejs.Mp3Encoder(1, 24000, 64);
+                logDebug('MP3 encoder ready (24kHz 64kbps mono)');
+            } else {
+                logDebug('Notice: lamejs not loaded, falling back to raw PCM');
+            }
 
             // Setup 4096-sample buffer processor (approx 170ms per buffer at 24kHz)
             scriptProcessor = audioContext.createScriptProcessor(4096, 1, 1);
             mediaStreamSource.connect(scriptProcessor);
 
-            // Output to silent gain node connected to destination to drive processor clock without feedback
+            // Connect to silent gain node connected to destination to drive audio clock without echo
             silentGain = audioContext.createGain();
             silentGain.gain.value = 0;
             scriptProcessor.connect(silentGain);
@@ -166,10 +175,18 @@ startBtn.addEventListener('click', async () => {
                     pcm16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
                 }
 
-                websocket.send(pcm16.buffer);
+                if (mp3Encoder) {
+                    const mp3buf = mp3Encoder.encodeBuffer(pcm16);
+                    if (mp3buf && mp3buf.length > 0) {
+                        const chunk = mp3buf.buffer.slice(mp3buf.byteOffset, mp3buf.byteOffset + mp3buf.byteLength);
+                        websocket.send(chunk);
+                    }
+                } else {
+                    websocket.send(pcm16.buffer);
+                }
             };
 
-            logDebug('Zero-container PCM stream started (24kHz 16-bit mono)');
+            logDebug('Live streaming started');
         };
 
         websocket.onmessage = (event) => {
@@ -203,6 +220,17 @@ function stopRecording(statusMessage = 'Recording stopped and saved on server.')
         animFrameId = null;
     }
     meterFill.style.width = '0%';
+
+    if (mp3Encoder && websocket && websocket.readyState === WebSocket.OPEN) {
+        try {
+            const finalChunk = mp3Encoder.flush();
+            if (finalChunk && finalChunk.length > 0) {
+                const chunk = finalChunk.buffer.slice(finalChunk.byteOffset, finalChunk.byteOffset + finalChunk.byteLength);
+                websocket.send(chunk);
+            }
+        } catch (_) {}
+    }
+    mp3Encoder = null;
 
     if (scriptProcessor) {
         scriptProcessor.onaudioprocess = null;
@@ -250,9 +278,15 @@ stopBtn.addEventListener('click', () => stopRecording());
 
 const shareUrlInput = document.getElementById('shareUrl');
 const copyBtn = document.getElementById('copyBtn');
+const openLink = document.getElementById('openLink');
+
 if (shareUrlInput) {
-    shareUrlInput.value = `${window.location.origin}/listen`;
+    shareUrlInput.value = `${window.location.origin}/stream`;
 }
+if (openLink) {
+    openLink.href = `${window.location.origin}/stream`;
+}
+
 if (copyBtn && shareUrlInput) {
     copyBtn.addEventListener('click', async () => {
         try {

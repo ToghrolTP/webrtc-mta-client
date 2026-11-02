@@ -1,5 +1,7 @@
+use axum::http::Request;
 use axum_test::{TestServer, WsMessage};
 use std::fs;
+use tower::ServiceExt;
 use webrtc_mta_client::app;
 
 #[tokio::test]
@@ -63,4 +65,20 @@ async fn test_live_streaming_broadcaster_to_listener() {
             }
         }
     }
+}
+
+#[tokio::test]
+async fn test_http_stream_endpoint() {
+    let app = app().await;
+    let req = Request::builder()
+        .uri("/stream")
+        .body(axum::body::Body::empty())
+        .unwrap();
+    let response = app.oneshot(req).await.unwrap();
+
+    assert_eq!(
+        response.headers().get("content-type").unwrap(),
+        "audio/mpeg"
+    );
+    assert_eq!(response.headers().get("connection").unwrap(), "keep-alive");
 }

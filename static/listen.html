@@ -4,30 +4,46 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Live Audio Player</title>
-    <link rel="stylesheet" href="/static/style.css?v=6">
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            min-height: 80vh;
+            background: #121212;
+            color: #eee;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, monospace;
+        }
+        h2 {
+            margin-bottom: 24px;
+            font-size: 1.5rem;
+            font-weight: 500;
+        }
+        audio {
+            width: 100%;
+            max-width: 480px;
+            border-radius: 8px;
+            outline: none;
+        }
+        .pure-link {
+            margin-top: 24px;
+            font-size: 14px;
+            color: #888;
+        }
+        .pure-link a {
+            color: #4da6ff;
+            text-decoration: underline;
+        }
+    </style>
 </head>
 <body>
     <h2>Live Audio Player</h2>
-
-    <fieldset>
-        <legend>Controls</legend>
-        <button id="listenBtn">Start Listening</button>
-        <button id="muteBtn" disabled>Mute</button>
-        <audio id="audioEl" autoplay playsinline></audio>
-    </fieldset>
-
-    <fieldset>
-        <legend>State</legend>
-        <div><strong>Status:</strong> <span id="statusDot">●</span> <span id="statusText">Ready</span></div>
-        <div><strong>Stream Chunks:</strong> <span id="queueCount">0</span></div>
-        <div id="message" class="hidden"></div>
-    </fieldset>
-
-    <fieldset>
-        <legend>Debug Log</legend>
-        <pre id="debugLog"></pre>
-    </fieldset>
-
-    <script src="/static/listen.js?v=6"></script>
+    <audio controls autoplay src="/stream"></audio>
+    <div class="pure-link">
+        Direct Browser Stream URL: <a href="/stream" target="_blank">/stream</a>
+    </div>
 </body>
 </html>

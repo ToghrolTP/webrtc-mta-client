@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>WebRTC Audio Recorder</title>
-    <link rel="stylesheet" href="/static/style.css?v=6">
+    <link rel="stylesheet" href="/static/style.css?v=7">
 </head>
 <body>
     <h2>WebRTC Audio Recorder</h2>
@@ -17,11 +17,11 @@
 
     <fieldset>
         <legend>Live Stream Link</legend>
-        <div>Share this link so others can listen live:</div>
+        <div>Share this link so others can listen directly in their browser:</div>
         <div class="share-box">
             <input type="text" id="shareUrl" class="share-input" readonly>
             <button id="copyBtn" type="button">Copy Link</button>
-            <a id="openLink" href="/listen" target="_blank"><button type="button">Open Player</button></a>
+            <a id="openLink" href="/stream" target="_blank"><button type="button">Open Browser Player</button></a>
         </div>
     </fieldset>
 
@@ -43,6 +43,7 @@
         <pre id="debugLog"></pre>
     </fieldset>
 
-    <script src="/static/app.js?v=6"></script>
+    <script src="/static/lame.min.js"></script>
+    <script src="/static/app.js?v=7"></script>
 </body>
 </html>

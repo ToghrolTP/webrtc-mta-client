@@ -15,6 +15,8 @@ chrono = "0.4"
 webrtc = { version = "0.21.1", features = ["runtime-tokio", "crypto-ring"] }
 rtc = { version = "0.21.1", features = ["crypto-ring"] }
 async-trait = "0.1"
+futures-util = "0.3"
 
 [dev-dependencies]
 axum-test = { version = "17.0", features = ["ws"] }
+tower = { version = "0.5", features = ["util"] }

@@ -1,6 +1,10 @@
-use axum::body::Bytes;
+use axum::body::{Body, Bytes};
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
-use axum::response::IntoResponse;
+use axum::http::{
+    HeaderMap, HeaderValue, StatusCode,
+    header::{CACHE_CONTROL, CONNECTION, CONTENT_TYPE},
+};
+use axum::response::{IntoResponse, Response};
 use chrono::Local;
 use std::fs;
 use std::path::PathBuf;
@@ -24,6 +28,33 @@ pub async fn ws_handler(ws: WebSocketUpgrade) -> impl IntoResponse {
 
 pub async fn ws_listen_handler(ws: WebSocketUpgrade) -> impl IntoResponse {
     ws.on_upgrade(handle_listener_socket)
+}
+
+pub async fn http_stream_handler() -> Response {
+    let rx = STREAM_HUB.sender.subscribe();
+
+    let stream = futures_util::stream::unfold(rx, |mut rx| async move {
+        loop {
+            match rx.recv().await {
+                Ok(data) => return Some((Ok::<Bytes, std::io::Error>(data), rx)),
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(missed)) => {
+                    tracing::warn!("Stream receiver lagged by {} chunks", missed);
+                    continue;
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => return None,
+            }
+        }
+    });
+
+    let mut headers = HeaderMap::new();
+    headers.insert(CONTENT_TYPE, HeaderValue::from_static("audio/mpeg"));
+    headers.insert(
+        CACHE_CONTROL,
+        HeaderValue::from_static("no-cache, no-store, must-revalidate"),
+    );
+    headers.insert(CONNECTION, HeaderValue::from_static("keep-alive"));
+
+    (StatusCode::OK, headers, Body::from_stream(stream)).into_response()
 }
 
 fn create_wav_header(
@@ -57,27 +88,19 @@ fn create_wav_header(
 async fn handle_socket(mut socket: WebSocket) {
     let recordings_dir = PathBuf::from("recordings");
     if let Err(e) = fs::create_dir_all(&recordings_dir) {
-        tracing::error!("Failed to create recordings dir: {:?}", e);
+        tracing::error!("Failed to create recordings directory: {:?}", e);
         return;
     }
 
     let ts = Local::now().format("%Y%m%d_%H%M%S_%3f").to_string();
     let mut file: Option<File> = None;
     let mut file_path = PathBuf::new();
-    let mut total_pcm_bytes = 0u32;
+    let mut total_bytes = 0u32;
     let mut is_wav = false;
 
     tracing::info!("Broadcaster connected to audio stream");
 
-    while let Some(msg_result) = socket.recv().await {
-        let msg = match msg_result {
-            Ok(m) => m,
-            Err(e) => {
-                tracing::warn!("WebSocket recv error: {:?}", e);
-                break;
-            }
-        };
-
+    while let Some(Ok(msg)) = socket.recv().await {
         match msg {
             Message::Binary(data) => {
                 if file.is_none() {
@@ -85,6 +108,8 @@ async fn handle_socket(mut socket: WebSocket) {
                         ("ogg", false)
                     } else if data.starts_with(&[0x1A, 0x45, 0xDF, 0xA3]) {
                         ("webm", false)
+                    } else if data.len() >= 2 && data[0] == 0xFF && (data[1] & 0xE0) == 0xE0 {
+                        ("mp3", false)
                     } else {
                         ("wav", true)
                     };
@@ -105,17 +130,17 @@ async fn handle_socket(mut socket: WebSocket) {
                             tracing::info!("Created recording file: {:?}", file_path);
                         }
                         Err(e) => {
-                            tracing::error!("Failed creating file {:?}: {:?}", path, e);
+                            tracing::error!("Failed to create recording file: {:?}", e);
                             break;
                         }
                     }
                 }
 
-                // Broadcast live chunk to all connected listeners
+                // Broadcast live chunk to all connected listeners (HTTP and WebSocket)
                 let _ = STREAM_HUB.sender.send(data.clone());
 
                 if let Some(ref mut f) = file {
-                    total_pcm_bytes = total_pcm_bytes.saturating_add(data.len() as u32);
+                    total_bytes = total_bytes.saturating_add(data.len() as u32);
                     if let Err(e) = f.write_all(&data).await {
                         tracing::error!("Error writing audio chunk: {:?}", e);
                         break;
@@ -123,31 +148,24 @@ async fn handle_socket(mut socket: WebSocket) {
                 }
             }
             Message::Close(_) => break,
-            Message::Ping(p) => {
-                let _ = socket.send(Message::Pong(p)).await;
-            }
             _ => {}
         }
     }
 
     if let Some(mut f) = file {
         if is_wav {
-            let file_size_minus_8 = total_pcm_bytes.saturating_add(36);
+            let file_size_minus_8 = total_bytes.saturating_add(36);
             let _ = f.seek(SeekFrom::Start(4)).await;
             let _ = f.write_all(&file_size_minus_8.to_le_bytes()).await;
             let _ = f.seek(SeekFrom::Start(40)).await;
-            let _ = f.write_all(&total_pcm_bytes.to_le_bytes()).await;
+            let _ = f.write_all(&total_bytes.to_le_bytes()).await;
         }
         let _ = f.flush().await;
-        tracing::info!(
-            "Recording saved: {:?} ({} bytes)",
-            file_path,
-            total_pcm_bytes
-        );
+        tracing::info!("Recording saved: {:?} ({} bytes)", file_path, total_bytes);
         let ack = serde_json::json!({
             "status": "saved",
             "file": file_path.to_string_lossy(),
-            "bytes": total_pcm_bytes
+            "bytes": total_bytes
         });
         let _ = socket.send(Message::Text(ack.to_string().into())).await;
     }
@@ -159,33 +177,31 @@ async fn handle_listener_socket(mut socket: WebSocket) {
 
     loop {
         tokio::select! {
-            res = rx.recv() => {
-                match res {
-                    Ok(chunk) => {
-                        if let Err(e) = socket.send(Message::Binary(chunk)).await {
-                            tracing::info!("Listener connection dropped: {:?}", e);
+            msg = rx.recv() => {
+                match msg {
+                    Ok(data) => {
+                        if let Err(e) = socket.send(Message::Binary(data)).await {
+                            tracing::warn!("Failed sending live chunk to listener: {:?}", e);
                             break;
                         }
                     }
-                    Err(broadcast::error::RecvError::Lagged(skipped)) => {
-                        tracing::warn!("Listener lagged by {} messages", skipped);
+                    Err(broadcast::error::RecvError::Lagged(missed)) => {
+                        tracing::warn!("Listener lagged by {} messages", missed);
                     }
                     Err(broadcast::error::RecvError::Closed) => {
-                        tracing::info!("Broadcast channel closed");
+                        tracing::info!("Audio broadcast channel closed");
                         break;
                     }
                 }
             }
-            msg = socket.recv() => {
-                match msg {
+            incoming = socket.recv() => {
+                match incoming {
                     Some(Ok(Message::Close(_))) | None => break,
-                    Some(Ok(Message::Ping(p))) => {
-                        let _ = socket.send(Message::Pong(p)).await;
-                    }
                     _ => {}
                 }
             }
         }
     }
+
     tracing::info!("Listener stream ended");
 }
