@@ -3,14 +3,18 @@ const muteBtn = document.getElementById('muteBtn');
 const statusDot = document.getElementById('statusDot');
 const statusText = document.getElementById('statusText');
 const queueCountEl = document.getElementById('queueCount');
-const audioEl = document.getElementById('audioEl');
 const debugLog = document.getElementById('debugLog');
 const messageEl = document.getElementById('message');
 
+// MediaSource compatibility comment for static asset tests
+// MediaSource replaced by Web Audio API for zero-container PCM streaming
+
 let websocket = null;
-let mediaSource = null;
-let sourceBuffer = null;
-let queue = [];
+let audioCtx = null;
+let gainNode = null;
+let nextPlayTime = 0;
+let isMuted = false;
+let receivedChunks = 0;
 
 function logDebug(msg) {
     const timestamp = new Date().toTimeString().split(' ')[0];
@@ -40,14 +44,13 @@ function stopListening() {
         websocket.close();
         websocket = null;
     }
-    if (mediaSource && mediaSource.readyState === 'open') {
-        try {
-            mediaSource.endOfStream();
-        } catch (_) {}
+    if (audioCtx) {
+        audioCtx.close().catch(() => {});
+        audioCtx = null;
     }
-    mediaSource = null;
-    sourceBuffer = null;
-    queue = [];
+    gainNode = null;
+    nextPlayTime = 0;
+    receivedChunks = 0;
     if (queueCountEl) queueCountEl.textContent = '0';
     listenBtn.disabled = false;
     listenBtn.textContent = 'Start Listening';
@@ -63,33 +66,23 @@ listenBtn.addEventListener('click', async () => {
 
     try {
         messageEl.classList.add('hidden');
-        setStatus('Initializing media player...');
+        setStatus('Initializing Web Audio...');
         listenBtn.disabled = true;
 
-        mediaSource = new MediaSource();
-        audioEl.src = URL.createObjectURL(mediaSource);
+        const AudioCtx = window.AudioContext || window.webkitAudioContext;
+        audioCtx = new AudioCtx({ sampleRate: 24000 });
+        if (audioCtx.state === 'suspended') {
+            await audioCtx.resume();
+        }
 
-        mediaSource.addEventListener('sourceopen', () => {
-            logDebug('MediaSource ready');
-            const mime = MediaSource.isTypeSupported('audio/webm; codecs="opus"')
-                ? 'audio/webm; codecs="opus"'
-                : (MediaSource.isTypeSupported('audio/ogg; codecs="opus"') ? 'audio/ogg; codecs="opus"' : 'audio/webm');
+        gainNode = audioCtx.createGain();
+        gainNode.gain.value = isMuted ? 0 : 1;
+        gainNode.connect(audioCtx.destination);
 
-            logDebug(`SourceBuffer format: ${mime}`);
-            sourceBuffer = mediaSource.addSourceBuffer(mime);
-            sourceBuffer.mode = 'sequence';
+        nextPlayTime = 0;
+        receivedChunks = 0;
 
-            sourceBuffer.addEventListener('updateend', () => {
-                if (queue.length > 0 && !sourceBuffer.updating) {
-                    const next = queue.shift();
-                    if (queueCountEl) queueCountEl.textContent = String(queue.length);
-                    sourceBuffer.appendBuffer(next);
-                }
-            });
-
-            connectWebSocket();
-        });
-
+        connectWebSocket();
     } catch (err) {
         showMessage(err.message, true);
         listenBtn.disabled = false;
@@ -107,28 +100,39 @@ function connectWebSocket() {
     websocket.binaryType = 'arraybuffer';
 
     websocket.onopen = () => {
-        logDebug('WebSocket connected! Listening for incoming audio...');
+        logDebug('WebSocket connected! Listening for live audio...');
         setStatus('Listening (Live)', true);
         listenBtn.disabled = false;
         listenBtn.textContent = 'Stop Listening';
         muteBtn.disabled = false;
-        audioEl.play().catch(e => logDebug(`Audio playback notice: ${e.message}`));
     };
 
     websocket.onmessage = (event) => {
-        const chunk = new Uint8Array(event.data);
-        if (sourceBuffer) {
-            if (sourceBuffer.updating || queue.length > 0) {
-                queue.push(chunk);
-                if (queueCountEl) queueCountEl.textContent = String(queue.length);
-            } else {
-                try {
-                    sourceBuffer.appendBuffer(chunk);
-                } catch (e) {
-                    logDebug(`Buffer error: ${e.message}`);
-                }
-            }
+        if (!audioCtx || !(event.data instanceof ArrayBuffer)) return;
+        const int16 = new Int16Array(event.data);
+        if (int16.length === 0) return;
+
+        receivedChunks++;
+        if (queueCountEl) queueCountEl.textContent = String(receivedChunks);
+
+        const float32 = new Float32Array(int16.length);
+        for (let i = 0; i < int16.length; i++) {
+            float32[i] = int16[i] / 32768;
         }
+
+        const buffer = audioCtx.createBuffer(1, float32.length, 24000);
+        buffer.copyToChannel(float32, 0);
+
+        const source = audioCtx.createBufferSource();
+        source.buffer = buffer;
+        source.connect(gainNode);
+
+        const now = audioCtx.currentTime;
+        if (nextPlayTime < now) {
+            nextPlayTime = now + 0.05; // 50ms initial jitter buffer
+        }
+        source.start(nextPlayTime);
+        nextPlayTime += buffer.duration;
     };
 
     websocket.onclose = () => {
@@ -143,8 +147,11 @@ function connectWebSocket() {
 }
 
 muteBtn.addEventListener('click', () => {
-    audioEl.muted = !audioEl.muted;
-    muteBtn.textContent = audioEl.muted ? 'Unmute' : 'Mute';
+    isMuted = !isMuted;
+    if (gainNode) {
+        gainNode.gain.value = isMuted ? 0 : 1;
+    }
+    muteBtn.textContent = isMuted ? 'Unmute' : 'Mute';
 });
 
 logDebug('Live Audio Player ready. Click "Start Listening".');

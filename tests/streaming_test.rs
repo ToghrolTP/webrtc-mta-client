@@ -16,38 +16,30 @@ async fn test_live_streaming_broadcaster_to_listener() {
         .into_websocket()
         .await;
 
-    // 2. Broadcaster sends initial header chunk
-    let header_bytes = b"OggS\x00\x02\x00\x00\x00\x00\x00\x00\x00\x00init_header";
+    // 2. Broadcaster sends initial chunk before listener connects
+    let chunk_before = b"chunk_before_listener_connected";
     broadcaster
-        .send_message(WsMessage::Binary(header_bytes.to_vec().into()))
+        .send_message(WsMessage::Binary(chunk_before.to_vec().into()))
         .await;
 
-    // Small delay to allow server to cache header
     tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 
-    // 3. Listener connects to /ws/listen
+    // 3. Listener connects to /ws/listen mid-stream
     let mut listener = server
         .get_websocket("/ws/listen")
         .await
         .into_websocket()
         .await;
 
-    // 4. Listener should immediately receive the cached initial header
-    let received_header = listener.receive_message().await;
-    match received_header {
-        WsMessage::Binary(bytes) => {
-            assert_eq!(&bytes[..], header_bytes);
-        }
-        other => panic!("Expected binary header message, got: {:?}", other),
-    }
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 
-    // 5. Broadcaster sends a live audio chunk
+    // 4. Broadcaster sends live audio chunk
     let live_chunk = b"live_chunk_data_456";
     broadcaster
         .send_message(WsMessage::Binary(live_chunk.to_vec().into()))
         .await;
 
-    // 6. Listener should receive the live chunk in real-time
+    // 5. Listener should receive the live chunk in real-time
     let received_live = listener.receive_message().await;
     match received_live {
         WsMessage::Binary(bytes) => {
@@ -56,7 +48,7 @@ async fn test_live_streaming_broadcaster_to_listener() {
         other => panic!("Expected binary live chunk, got: {:?}", other),
     }
 
-    // 7. Broadcaster finishes
+    // 6. Broadcaster finishes
     broadcaster.send_message(WsMessage::Close(None)).await;
     tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 
@@ -65,7 +57,7 @@ async fn test_live_streaming_broadcaster_to_listener() {
         for entry in entries.flatten() {
             let path = entry.path();
             if let Ok(content) = fs::read(&path)
-                && content.windows(11).any(|w| w == b"init_header")
+                && content.windows(15).any(|w| w == b"live_chunk_data")
             {
                 let _ = fs::remove_file(path);
             }

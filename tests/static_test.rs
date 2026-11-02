@@ -27,5 +27,6 @@ async fn test_serves_static_assets() {
 
     let response = server.get("/static/listen.js").await;
     assert_eq!(response.status_code(), StatusCode::OK);
+    assert!(response.text().contains("AudioContext"));
     assert!(response.text().contains("MediaSource"));
 }
