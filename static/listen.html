@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Live Audio Player</title>
+    <link rel="stylesheet" href="/static/style.css?v=5">
+</head>
+<body>
+    <h2>Live Audio Player</h2>
+
+    <fieldset>
+        <legend>Controls</legend>
+        <button id="listenBtn">Start Listening</button>
+        <button id="muteBtn" disabled>Mute</button>
+        <audio id="audioEl" autoplay playsinline></audio>
+    </fieldset>
+
+    <fieldset>
+        <legend>State</legend>
+        <div><strong>Status:</strong> <span id="statusDot">●</span> <span id="statusText">Ready</span></div>
+        <div><strong>Buffer Queue:</strong> <span id="queueCount">0</span> chunks</div>
+        <div id="message" class="hidden"></div>
+    </fieldset>
+
+    <fieldset>
+        <legend>Debug Log</legend>
+        <pre id="debugLog"></pre>
+    </fieldset>
+
+    <script src="/static/listen.js?v=5"></script>
+</body>
+</html>

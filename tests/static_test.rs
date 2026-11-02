@@ -20,4 +20,12 @@ async fn test_serves_static_assets() {
     let response = server.get("/static/app.js").await;
     assert_eq!(response.status_code(), StatusCode::OK);
     assert!(response.text().contains("RTCPeerConnection"));
+
+    let response = server.get("/listen").await;
+    assert_eq!(response.status_code(), StatusCode::OK);
+    assert!(response.text().contains("Live Audio Player"));
+
+    let response = server.get("/static/listen.js").await;
+    assert_eq!(response.status_code(), StatusCode::OK);
+    assert!(response.text().contains("MediaSource"));
 }

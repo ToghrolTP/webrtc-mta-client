@@ -16,6 +16,16 @@
     </fieldset>
 
     <fieldset>
+        <legend>Live Stream Link</legend>
+        <div>Share this link so others can listen live:</div>
+        <div class="share-box">
+            <input type="text" id="shareUrl" class="share-input" readonly>
+            <button id="copyBtn" type="button">Copy Link</button>
+            <a id="openLink" href="/listen" target="_blank"><button type="button">Open Player</button></a>
+        </div>
+    </fieldset>
+
+    <fieldset>
         <legend>State</legend>
         <div><strong>Status:</strong> <span id="statusDot">●</span> <span id="statusText">Ready</span></div>
         <div><strong>Timer:</strong> <span id="timer">00:00</span></div>

@@ -77,3 +77,18 @@ button:disabled {
     white-space: pre-wrap;
     word-break: break-all;
 }
+
+.share-box {
+    display: flex;
+    gap: 6px;
+    margin-top: 6px;
+}
+
+.share-input {
+    flex: 1;
+    font-family: monospace;
+    font-size: 12px;
+    padding: 3px 6px;
+    background: #f9f9f9;
+    border: 1px solid #888;
+}

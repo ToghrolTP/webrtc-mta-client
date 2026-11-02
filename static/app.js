@@ -189,4 +189,24 @@ function stopRecording(statusMessage = 'Recording stopped and saved on server.')
 
 stopBtn.addEventListener('click', () => stopRecording());
 
+const shareUrlInput = document.getElementById('shareUrl');
+const copyBtn = document.getElementById('copyBtn');
+if (shareUrlInput) {
+    shareUrlInput.value = `${window.location.origin}/listen`;
+}
+if (copyBtn && shareUrlInput) {
+    copyBtn.addEventListener('click', async () => {
+        try {
+            await navigator.clipboard.writeText(shareUrlInput.value);
+            copyBtn.textContent = 'Copied!';
+            setTimeout(() => { copyBtn.textContent = 'Copy Link'; }, 2000);
+        } catch (_) {
+            shareUrlInput.select();
+            document.execCommand('copy');
+            copyBtn.textContent = 'Copied!';
+            setTimeout(() => { copyBtn.textContent = 'Copy Link'; }, 2000);
+        }
+    });
+}
+
 logDebug('Audio Recorder UI ready.');
